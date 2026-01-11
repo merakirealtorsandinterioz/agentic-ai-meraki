@@ -18,6 +18,26 @@ app.get("/health", (req, res) => {
   });
 });
 
+// ===============================
+// 🧠 AGENTIC AI – CHAT ENDPOINT
+// ===============================
+app.post("/chat", (req, res) => {
+  const userMessage = req.body.message;
+
+  if (!userMessage) {
+    return res.status(400).json({
+      error: "Message is required"
+    });
+  }
+
+  // Temporary AI brain (dummy response)
+  const aiReply = `You said: "${userMessage}". Agentic AI Meraki is listening.`;
+
+  res.json({
+    reply: aiReply
+  });
+});
+
 // Start server (Render uses PORT automatically)
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
