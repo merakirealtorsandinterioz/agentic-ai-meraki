@@ -1,64 +1,66 @@
 const express = require("express");
+const OpenAI = require("openai");
 
 const app = express();
 app.use(express.json());
 
-// Root
-app.get("/", (req, res) => {
-  res.send("🤖 Agentic AI Meraki is LIVE with REAL AI!");
+// OpenAI client (API key Render ENV se aayegi)
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Health
+// Root route
+app.get("/", (req, res) => {
+  res.send("🤖 Agentic AI Meraki is LIVE with GPT!");
+});
+
+// Health check
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     service: "agentic-ai-meraki",
     ai: "connected",
-    time: new Date().toISOString()
+    time: new Date().toISOString(),
   });
 });
 
-// REAL AI CHAT
+// REAL AI CHAT ENDPOINT
 app.post("/chat", async (req, res) => {
   try {
-    const userMessage = req.body.message;
+    const { message } = req.body;
 
-    if (!userMessage) {
-      return res.status(400).json({ error: "message is required" });
+    if (!message) {
+      return res.status(400).json({ error: "Message is required" });
     }
 
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "gpt-5-mini",
-        input: `You are a professional real estate AI assistant in India.
-Answer clearly and helpfully.
-
-User query: ${userMessage}`
-      })
+    const response = await client.responses.create({
+      model: "gpt-5-mini",
+      input: [
+        {
+          role: "system",
+          content: "You are a helpful real estate AI assistant for India.",
+        },
+        {
+          role: "user",
+          content: message,
+        },
+      ],
     });
 
-    const data = await response.json();
+    // ✅ SAFE TEXT EXTRACTION
+    const reply =
+      response.output_text ||
+      response.output?.[0]?.content?.[0]?.text ||
+      "No response from AI";
 
-    // ✅ CORRECT TEXT EXTRACTION
-    const aiReply =
-      data.output &&
-      data.output[0] &&
-      data.output[0].content &&
-      data.output[0].content[0] &&
-      data.output[0].content[0].text
-        ? data.output[0].content[0].text
-        : "AI could not generate a response";
-
-    res.json({ reply: aiReply });
+    res.json({ reply });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "AI failed" });
+    console.error("AI ERROR:", error);
+    res.status(500).json({
+      error: "AI failed",
+      details: error.message,
+    });
   }
 });
 
