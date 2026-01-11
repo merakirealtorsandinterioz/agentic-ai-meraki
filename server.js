@@ -1,7 +1,12 @@
 const express = require("express");
+const OpenAI = require("openai");
 
 const app = express();
 app.use(express.json());
+
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // Root
 app.get("/", (req, res) => {
@@ -21,40 +26,26 @@ app.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "Message required" });
     }
 
-    const response = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a professional real estate consultant in India.",
         },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a professional real estate consultant in India.",
-            },
-            {
-              role: "user",
-              content: message,
-            },
-          ],
-        }),
-      }
-    );
-
-    const data = await response.json();
+        {
+          role: "user",
+          content: message,
+        },
+      ],
+    });
 
     res.json({
-      reply:
-        data.choices?.[0]?.message?.content ||
-        "AI response unavailable",
+      reply: completion.choices[0].message.content,
     });
   } catch (err) {
-    console.error(err);
+    console.error("OPENAI ERROR:", err);
     res.status(500).json({ error: "AI failed" });
   }
 });
