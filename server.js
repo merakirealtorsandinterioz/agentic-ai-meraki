@@ -4,12 +4,12 @@ const OpenAI = require("openai");
 const app = express();
 app.use(express.json());
 
-// OpenAI client (API key Render se automatically milegi)
+// OpenAI client (API key Render ENV se aayegi)
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// Root
+// Root route
 app.get("/", (req, res) => {
   res.send("🤖 Agentic AI Meraki is LIVE with GPT!");
 });
@@ -30,13 +30,15 @@ app.post("/chat", async (req, res) => {
     const userMessage = req.body.message;
 
     if (!userMessage) {
-      return res.status(400).json({ error: "Message is required" });
+      return res.status(400).json({
+        error: "Message is required"
+      });
     }
 
     const response = await client.responses.create({
       model: "gpt-5-mini",
-      input: `You are a helpful real estate AI assistant.
-User says: ${userMessage}`
+      input: `You are Meraki AI, a professional real estate consultant for Noida & Greater Noida.
+User query: ${userMessage}`
     });
 
     res.json({
@@ -44,12 +46,14 @@ User says: ${userMessage}`
     });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "AI error" });
+    console.error("AI ERROR:", error);
+    res.status(500).json({
+      error: "AI failed to respond"
+    });
   }
 });
 
-// Start server
+// Start server (Render auto PORT)
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
