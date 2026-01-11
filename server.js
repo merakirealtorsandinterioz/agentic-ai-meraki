@@ -152,7 +152,26 @@ if (aiResult.lead_meta.lead_stage === "warm") {
   };
 }
 
-    
+    // -------- CRM AGENT (STAGE-5) --------
+try {
+  await fetch(process.env.CRM_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      intent: aiResult.lead_meta.intent,
+      budget: aiResult.lead_meta.budget,
+      location: aiResult.lead_meta.location,
+      property_type: aiResult.lead_meta.property_type,
+      lead_stage: aiResult.lead_meta.lead_stage,
+      ask_contact: aiResult.lead_meta.ask_contact,
+      followup_type: aiResult.follow_up.type,
+      message: userMessage
+    })
+  });
+} catch (err) {
+  console.error("CRM webhook failed (non-blocking)");
+}
+
     // -------- FINAL RESPONSE --------
     return res.json(aiResult);
 
