@@ -1,32 +1,25 @@
 const express = require("express");
 const app = express();
 
+// Middleware
 app.use(express.json());
 
-// Home route
+// Root route (homepage)
 app.get("/", (req, res) => {
   res.send("🤖 Agentic AI Meraki is LIVE!");
 });
 
-// Health check route
+// Health check (Render + future monitoring)
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     service: "agentic-ai-meraki",
-    time: new Date()
+    time: new Date().toISOString()
   });
 });
 
-// Temporary test chat route
-app.post("/chat", (req, res) => {
-  const userMessage = req.body.message || "No message received";
-
-  res.json({
-    reply: `AI received your message: "${userMessage}"`
-  });
-});
-
+// Start server (Render uses PORT automatically)
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log(`Server running on port ${PORT}`);
 });
