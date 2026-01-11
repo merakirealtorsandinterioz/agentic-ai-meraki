@@ -131,6 +131,28 @@ Guidelines:
         "\n\nIf you’d like, you can share your WhatsApp number and I’ll send you a curated shortlist with photos, pricing, and help arrange site visits.";
     }
 
+    // -------- FOLLOW-UP AGENT (STAGE-4) --------
+aiResult.follow_up = { type: "none", delay: "none", message: "" };
+
+if (aiResult.lead_meta.lead_stage === "hot") {
+  aiResult.follow_up = {
+    type: "whatsapp",
+    delay: "24h",
+    message:
+      "Hi! Just checking in — I’ve shortlisted a few 2 BHK options that match your requirement. Let me know if you’d like me to share them on WhatsApp or arrange site visits."
+  };
+}
+
+if (aiResult.lead_meta.lead_stage === "warm") {
+  aiResult.follow_up = {
+    type: "chat",
+    delay: "48h",
+    message:
+      "Just following up to see if you’d like me to shortlist options or answer any questions about pricing, possession, or loans."
+  };
+}
+
+    
     // -------- FINAL RESPONSE --------
     return res.json(aiResult);
 
