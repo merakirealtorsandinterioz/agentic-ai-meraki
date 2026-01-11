@@ -8,7 +8,7 @@ app.get("/", (req, res) => {
   res.send("🤖 Agentic AI Meraki is LIVE with REAL AI!");
 });
 
-// Health check
+// Health
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
@@ -18,7 +18,7 @@ app.get("/health", (req, res) => {
   });
 });
 
-// REAL AI CHAT (NO SDK – DIRECT API)
+// REAL AI CHAT
 app.post("/chat", async (req, res) => {
   try {
     const userMessage = req.body.message;
@@ -36,15 +36,25 @@ app.post("/chat", async (req, res) => {
       body: JSON.stringify({
         model: "gpt-5-mini",
         input: `You are a professional real estate AI assistant in India.
+Answer clearly and helpfully.
+
 User query: ${userMessage}`
       })
     });
 
     const data = await response.json();
 
-    res.json({
-      reply: data.output_text || "AI response unavailable"
-    });
+    // ✅ CORRECT TEXT EXTRACTION
+    const aiReply =
+      data.output &&
+      data.output[0] &&
+      data.output[0].content &&
+      data.output[0].content[0] &&
+      data.output[0].content[0].text
+        ? data.output[0].content[0].text
+        : "AI could not generate a response";
+
+    res.json({ reply: aiReply });
 
   } catch (error) {
     console.error(error);
