@@ -1,12 +1,7 @@
 const express = require("express");
-const OpenAI = require("openai");
 
 const app = express();
 app.use(express.json());
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
 
 // Root
 app.get("/", (req, res) => {
@@ -31,16 +26,24 @@ app.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "Message required" });
     }
 
-    const response = await client.responses.create({
-      model: "gpt-5-mini",
-      input: `You are a professional real estate consultant in India.
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-5-mini",
+        input: `You are a professional real estate consultant in India.
 User query: ${message}`,
+      }),
     });
 
-    // ✅ SAFEST EXTRACTION
+    const data = await response.json();
+
     const reply =
-      response.output_text ||
-      response.output?.[0]?.content?.[0]?.text ||
+      data.output_text ||
+      data.output?.[0]?.content?.[0]?.text ||
       "No AI response generated";
 
     res.json({ reply });
@@ -49,7 +52,7 @@ User query: ${message}`,
     console.error("AI ERROR:", err);
     res.status(500).json({
       error: "OpenAI failed",
-      message: err.message,
+      details: err.message,
     });
   }
 });
