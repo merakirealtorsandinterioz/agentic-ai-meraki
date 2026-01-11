@@ -1,114 +1,111 @@
 const express = require("express");
+const OpenAI = require("openai");
 
 const app = express();
 app.use(express.json());
 
-// ==============================
-// BASIC ROUTES
-// ==============================
-
-app.get("/", (req, res) => {
-  res.send("🤖 Meraki AI – Agentic Real Estate Assistant is LIVE");
+// OpenAI client
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
+// ---------- ROOT ----------
+app.get("/", (req, res) => {
+  res.send("🤖 Agentic AI Meraki – Master Control LIVE");
+});
+
+// ---------- HEALTH ----------
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    service: "meraki-agentic-ai",
+    service: "agentic-ai-meraki",
+    stage: "Lead Gen Agent Active",
     time: new Date().toISOString(),
   });
 });
 
-// ==============================
-// MASTER CONTROL AGENT (MCA)
-// ==============================
-
+// ---------- CHAT (Master Control + Lead Gen) ----------
 app.post("/chat", async (req, res) => {
   try {
-    const { message } = req.body;
-
-    if (!message) {
+    const userMessage = req.body.message;
+    if (!userMessage) {
       return res.status(400).json({ error: "Message is required" });
     }
 
-    // ----- MASTER SYSTEM PROMPT -----
+    // SYSTEM PROMPT = MASTER + LEAD GEN AGENT
     const systemPrompt = `
-You are Meraki AI, the Master Control Agent for a real estate business in India.
+You are an expert real estate sales AI for India.
 
-Your goals:
-1) Reply like a senior real estate consultant (helpful, practical, professional).
-2) Ask smart follow-up questions if information is missing.
-3) Classify the lead internally.
+Your tasks:
+1. Understand buyer intent (buy / rent / invest)
+2. Extract lead details if possible (budget, location, property type)
+3. Respond like a professional real estate consultant
+4. DO NOT force contact details
+5. If buyer intent is strong, softly ask for WhatsApp or phone number
 
-IMPORTANT OUTPUT RULE:
-You MUST respond ONLY in valid JSON in this exact format:
+Always return JSON in this exact format:
 
 {
-  "reply": "string (natural human reply for the user)",
+  "reply": "text for user",
   "lead_meta": {
-    "intent": "buy | invest | browse | unknown",
-    "budget": "number or null",
-    "location": "string or null",
-    "property_type": "2BHK | 3BHK | villa | plot | unknown",
-    "timeline": "immediate | 3-6 months | 6-12 months | unknown",
-    "lead_quality": "hot | warm | cold"
+    "intent": "",
+    "budget": "",
+    "location": "",
+    "property_type": "",
+    "lead_stage": "cold | warm | hot",
+    "ask_contact": true | false
   }
 }
 `;
 
-    // ----- OPENAI API CALL (STABLE CHAT COMPLETIONS) -----
-    const response = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+    const response = await client.responses.create({
+      model: "gpt-5-mini",
+      input: [
+        {
+          role: "system",
+          content: systemPrompt,
         },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: message },
-          ],
-        }),
-      }
-    );
+        {
+          role: "user",
+          content: userMessage,
+        },
+      ],
+    });
 
-    const data = await response.json();
+    let outputText = response.output_text;
 
-    if (!data.choices || !data.choices[0]) {
-      return res.status(500).json({ error: "Invalid AI response" });
-    }
-
-    // ----- SAFE JSON PARSE -----
-    let aiOutput;
-    try {
-      aiOutput = JSON.parse(data.choices[0].message.content);
-    } catch (e) {
-      return res.status(500).json({
-        error: "AI response parsing failed",
-        raw: data.choices[0].message.content,
+    // Safety fallback
+    if (!outputText) {
+      return res.json({
+        reply: "Thanks for your query. Could you please share a bit more detail?",
+        lead_meta: { lead_stage: "cold", ask_contact: false },
       });
     }
 
-    // ----- FINAL RESPONSE -----
-    res.json({
-      reply: aiOutput.reply,
-      lead_meta: aiOutput.lead_meta,
-    });
+    // Try parsing JSON safely
+    let parsed;
+    try {
+      parsed = JSON.parse(outputText);
+    } catch (e) {
+      parsed = {
+        reply: outputText,
+        lead_meta: { lead_stage: "warm", ask_contact: false },
+      };
+    }
+
+    res.json(parsed);
 
   } catch (error) {
-    console.error("SERVER ERROR:", error);
-    res.status(500).json({ error: "AI failed to respond" });
+    console.error("AI ERROR:", error.message);
+    res.status(500).json({
+      error: "AI failed",
+      details: error.message,
+    });
   }
 });
 
-// ==============================
-// SERVER START
-// ==============================
-
+// ---------- START ----------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Meraki Agentic AI running on port ${PORT}`);
+  console.log(`🚀 Agentic AI Meraki running on port ${PORT}`);
 });
