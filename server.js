@@ -3,12 +3,26 @@ const app = express();
 
 app.use(express.json());
 
-app.post("/api/lead-intake", (req, res) => {
-  console.log("New Lead Received:", req.body);
+// Home route
+app.get("/", (req, res) => {
+  res.send("🤖 Agentic AI Meraki is LIVE!");
+});
+
+// Health check route
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    service: "agentic-ai-meraki",
+    time: new Date()
+  });
+});
+
+// Temporary test chat route
+app.post("/chat", (req, res) => {
+  const userMessage = req.body.message || "No message received";
 
   res.json({
-    status: "success",
-    message: "Lead received successfully"
+    reply: `AI received your message: "${userMessage}"`
   });
 });
 
