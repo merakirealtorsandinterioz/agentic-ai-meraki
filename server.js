@@ -18,21 +18,21 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
 
-// CHAT
+// CHAT (LATEST OPENAI RESPONSES API)
 app.post("/chat", async (req, res) => {
   try {
     const { message } = req.body;
+
     if (!message) {
       return res.status(400).json({ error: "Message required" });
     }
 
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
+    const response = await client.responses.create({
+      model: "gpt-5-mini",
+      input: [
         {
           role: "system",
-          content:
-            "You are a professional real estate consultant in India.",
+          content: "You are a professional real estate consultant in India.",
         },
         {
           role: "user",
@@ -41,12 +41,18 @@ app.post("/chat", async (req, res) => {
       ],
     });
 
-    res.json({
-      reply: completion.choices[0].message.content,
-    });
+    const outputText =
+      response.output_text ||
+      response.output?.[0]?.content?.[0]?.text ||
+      "No response generated";
+
+    res.json({ reply: outputText });
   } catch (err) {
     console.error("OPENAI ERROR:", err);
-    res.status(500).json({ error: "AI failed" });
+    res.status(500).json({
+      error: "AI failed",
+      details: err.message,
+    });
   }
 });
 
