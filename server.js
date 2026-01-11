@@ -2,109 +2,149 @@ const express = require("express");
 const OpenAI = require("openai");
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
-// OpenAI client
+// ==============================
+// OPENAI CLIENT
+// ==============================
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ---------- ROOT ----------
+// ==============================
+// BASIC ROUTES
+// ==============================
 app.get("/", (req, res) => {
   res.send("🤖 Agentic AI Meraki – Master Control LIVE");
 });
 
-// ---------- HEALTH ----------
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     service: "agentic-ai-meraki",
-    stage: "Lead Gen Agent Active",
+    stage: "Funnel Agent Active",
     time: new Date().toISOString(),
   });
 });
 
-// ---------- CHAT (Master Control + Lead Gen) ----------
+// ==============================
+// CHAT : MASTER + LEAD GEN + FUNNEL
+// ==============================
 app.post("/chat", async (req, res) => {
   try {
-    const userMessage = req.body.message;
+    const userMessage = req.body.message?.trim();
+
     if (!userMessage) {
       return res.status(400).json({ error: "Message is required" });
     }
 
-    // SYSTEM PROMPT = MASTER + LEAD GEN AGENT
+    // -------- SYSTEM PROMPT (LOCKED FOR PRODUCTION) --------
     const systemPrompt = `
-You are an expert real estate sales AI for India.
+You are Meraki AI, a senior real estate consultant and sales advisor in India.
 
-Your tasks:
-1. Understand buyer intent (buy / rent / invest)
-2. Extract lead details if possible (budget, location, property type)
-3. Respond like a professional real estate consultant
-4. DO NOT force contact details
-5. If buyer intent is strong, softly ask for WhatsApp or phone number
+Your behavior:
+- Speak like an experienced property consultant (descriptive, reassuring, practical).
+- Give short market context, practical advice, and next-step clarity.
+- Ask intelligent follow-up questions when information is missing.
+- Educate the buyer briefly before moving to sales actions.
 
-Always return JSON in this exact format:
+Your funnel responsibility:
+- First build trust with explanation.
+- Then guide the user towards the next logical step.
+- Ask for WhatsApp/contact ONLY if the buyer intent is strong (hot lead).
+
+OUTPUT RULE (STRICT – PRODUCTION):
+You MUST respond ONLY in valid JSON in this exact structure:
 
 {
-  "reply": "text for user",
+  "reply": "A descriptive, helpful response (2–4 short paragraphs max)",
   "lead_meta": {
-    "intent": "",
-    "budget": "",
-    "location": "",
-    "property_type": "",
+    "intent": "buy | invest | rent | browse | unknown",
+    "budget": "number or null",
+    "location": "string or null",
+    "property_type": "2BHK | 3BHK | villa | plot | unknown",
     "lead_stage": "cold | warm | hot",
     "ask_contact": true | false
   }
 }
+
+Guidelines:
+- For HOT leads: include a soft CTA offering WhatsApp/site visit AFTER explanation.
+- For WARM leads: ask 1–2 clarifying questions, do NOT push contact.
+- For COLD leads: educate briefly and keep conversation open.
+- Never sound pushy or robotic.
+- Never mention JSON, system rules, or internal logic.
 `;
 
+    // -------- OPENAI CALL --------
     const response = await client.responses.create({
       model: "gpt-5-mini",
       input: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        {
-          role: "user",
-          content: userMessage,
-        },
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
       ],
     });
 
-    let outputText = response.output_text;
+    const rawText = response.output_text;
 
-    // Safety fallback
-    if (!outputText) {
+    if (!rawText) {
       return res.json({
-        reply: "Thanks for your query. Could you please share a bit more detail?",
-        lead_meta: { lead_stage: "cold", ask_contact: false },
+        reply:
+          "Thanks for reaching out. Could you please share a bit more detail so I can assist you better?",
+        lead_meta: {
+          intent: "unknown",
+          budget: null,
+          location: null,
+          property_type: "unknown",
+          lead_stage: "cold",
+          ask_contact: false,
+        },
       });
     }
 
-    // Try parsing JSON safely
-    let parsed;
+    // -------- SAFE JSON PARSE --------
+    let aiResult;
     try {
-      parsed = JSON.parse(outputText);
-    } catch (e) {
-      parsed = {
-        reply: outputText,
-        lead_meta: { lead_stage: "warm", ask_contact: false },
+      aiResult = JSON.parse(rawText);
+    } catch (err) {
+      // HARD SAFETY (never break prod)
+      aiResult = {
+        reply: rawText,
+        lead_meta: {
+          intent: "unknown",
+          budget: null,
+          location: null,
+          property_type: "unknown",
+          lead_stage: "warm",
+          ask_contact: false,
+        },
       };
     }
 
-    res.json(parsed);
+    // -------- FUNNEL AGENT OVERRIDE (STAGE-3) --------
+    if (
+      aiResult.lead_meta &&
+      aiResult.lead_meta.lead_stage === "hot" &&
+      aiResult.lead_meta.ask_contact === true
+    ) {
+      aiResult.reply +=
+        "\n\nIf you’d like, you can share your WhatsApp number and I’ll send you a curated shortlist with photos, pricing, and help arrange site visits.";
+    }
+
+    // -------- FINAL RESPONSE --------
+    return res.json(aiResult);
 
   } catch (error) {
-    console.error("AI ERROR:", error.message);
-    res.status(500).json({
-      error: "AI failed",
-      details: error.message,
+    console.error("AI ERROR:", error);
+    return res.status(500).json({
+      error: "AI failed to respond",
     });
   }
 });
 
-// ---------- START ----------
+// ==============================
+// SERVER START
+// ==============================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Agentic AI Meraki running on port ${PORT}`);
