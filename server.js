@@ -34,17 +34,36 @@ app.post("/chat", async (req, res) => {
       },
       body: JSON.stringify({
         model: "gpt-5-mini",
-        input: `You are a professional real estate consultant in India.
-User query: ${message}`,
+        messages: [
+          {
+            role: "system",
+            content: "You are a professional real estate consultant in India."
+          },
+          {
+            role: "user",
+            content: message
+          }
+        ]
       }),
     });
 
     const data = await response.json();
 
-    const reply =
-      data.output_text ||
-      data.output?.[0]?.content?.[0]?.text ||
-      "No AI response generated";
+    // ✅ CORRECT WAY TO READ RESPONSE
+    let reply = "AI could not generate a response";
+
+    if (data.output && Array.isArray(data.output)) {
+      for (const item of data.output) {
+        if (item.content) {
+          for (const block of item.content) {
+            if (block.type === "output_text") {
+              reply = block.text;
+              break;
+            }
+          }
+        }
+      }
+    }
 
     res.json({ reply });
 
