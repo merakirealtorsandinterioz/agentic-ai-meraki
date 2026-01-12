@@ -1,6 +1,11 @@
 const express = require("express");
 const OpenAI = require("openai");
 
+app.get("/ready", (req, res) => {
+  res.json({ ready: true });
+});
+
+
 // Node 18+ has fetch built-in (Render OK)
 const app = express();
 app.use(express.json({ limit: "1mb" }));
