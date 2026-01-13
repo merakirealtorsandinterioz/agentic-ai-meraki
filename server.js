@@ -207,6 +207,101 @@ Behavior rules:
 });
 
 // ==============================
+// AGENTIC AI – STRUCTURED INTAKE
+// ==============================
+app.post("/agent-intake", async (req, res) => {
+  try {
+    const payload = req.body;
+
+    // Basic validation
+    if (!payload || !payload.intent) {
+      return res.status(400).json({ error: "Invalid intake payload" });
+    }
+
+    // AI system prompt (decision-making only)
+    const systemPrompt = `
+You are Meraki AI, a senior real estate consultant in India.
+
+You are receiving a QUALIFIED LEAD from a landing page.
+This is NOT a casual chat.
+
+Your task:
+- Confirm intent
+- Decide lead stage (cold / warm / hot)
+- Decide next best action (whatsapp / call / educate)
+
+Respond ONLY in JSON:
+
+{
+  "lead_stage": "cold | warm | hot",
+  "recommended_action": "whatsapp | call | educate",
+  "internal_summary": "short reasoning"
+}
+`;
+
+    const userContext = `
+Lead Source: ${payload.source}
+Channel: ${payload.channel}
+
+Intent: ${payload.intent}
+Location: ${payload.location}
+Budget Range: ${payload.budget_range}
+Property Type: ${payload.unit_type}
+
+Page URL: ${payload.page_url}
+`;
+
+    const response = await client.responses.create({
+      model: "gpt-5-mini",
+      input: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userContext }
+      ]
+    });
+
+    let aiResult;
+    try {
+      aiResult = JSON.parse(response.output_text);
+    } catch {
+      aiResult = {
+        lead_stage: "warm",
+        recommended_action: "educate",
+        internal_summary: "fallback"
+      };
+    }
+
+    // Push to CRM / Google Sheet (safe, non-blocking)
+    try {
+      await fetch(process.env.CRM_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          lead_stage: aiResult.lead_stage,
+          recommended_action: aiResult.recommended_action,
+          ai_summary: aiResult.internal_summary
+        })
+      });
+    } catch (e) {
+      console.error("CRM webhook failed");
+    }
+
+    // Fast response to frontend
+    res.json({
+      success: true,
+      lead_stage: aiResult.lead_stage,
+      recommended_action: aiResult.recommended_action
+    });
+
+  } catch (error) {
+    console.error("Agent Intake Error:", error);
+    res.status(500).json({ error: "Agent intake failed" });
+  }
+});
+
+
+
+// ==============================
 // SERVER START
 // ==============================
 const PORT = process.env.PORT || 3000;
