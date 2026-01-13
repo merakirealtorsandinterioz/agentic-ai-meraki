@@ -1,24 +1,22 @@
 const express = require("express");
 const OpenAI = require("openai");
 
-// Node 18+ has fetch built-in (Render OK)
+// ==============================
+// APP SETUP
+// ==============================
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
 // ==============================
-// CORS FIX (FRONTEND PERMISSION)
+// CORS (SAFE)
 // ==============================
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
-  }
+  if (req.method === "OPTIONS") return res.sendStatus(200);
   next();
 });
-
 
 // ==============================
 // OPENAI CLIENT
@@ -38,345 +36,194 @@ app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     service: "agentic-ai-meraki",
-    agents: ["LeadGen", "Funnel", "FollowUp", "CRM"],
+    mode: "LOCKED_FLOW",
     time: new Date().toISOString(),
   });
 });
 
 // ==============================
-// CHAT ENDPOINT (BALANCED BRAIN)
+// AGENTIC AI – SINGLE ENDPOINT
 // ==============================
-app.post("/chat", async (req, res) => {
+app.post("/agent-intake", async (req, res) => {
   try {
-    const userMessage = req.body.message?.trim();
-    if (!userMessage) {
-      return res.status(400).json({ error: "Message is required" });
+    const payload = req.body || {};
+
+    // --------------------------------
+    // MODE DETECTION
+    // --------------------------------
+    const hasPhone = !!payload.phone; // phone mandatory only in COMMIT
+    const isCommit = hasPhone === true;
+
+    // --------------------------------
+    // BASIC VALIDATION (COMMON)
+    // --------------------------------
+    if (!payload.intent) {
+      return res.status(400).json({ error: "Intent missing" });
     }
 
-    // ==============================
-    // SYSTEM PROMPT (BALANCED)
-    // ==============================
-    const systemPrompt = `
-You are Meraki AI — a senior Indian real estate consultant and sales strategist.
+    // ============================================================
+    // MODE-1 : BRAIN MODE (NO PHONE / EMAIL)
+    // ============================================================
+    if (!isCommit) {
+      const systemPrompt = `
+You are Meraki AI, a senior Indian real estate consultant.
 
-Your tone:
-- Human, calm, confident, experienced
-- Slightly descriptive but never long-winded
-- Practical, market-aware, trustworthy
+You are receiving ANONYMOUS INTENT DATA.
+Do NOT ask for contact.
+Do NOT think about sales.
 
-Your funnel logic:
-1) First explain briefly (market clarity / reassurance)
-2) Then guide to next logical step
-3) Ask for WhatsApp/contact ONLY if intent is strong (hot lead)
-
-Lead understanding:
-- Identify intent: buy | invest | rent | browse | unknown
-- Extract budget, location, property type if mentioned
+Task:
 - Decide lead_stage: cold | warm | hot
+- Decide recommended_action: educate | whatsapp | call
 
-IMPORTANT OUTPUT RULE (STRICT):
-You MUST respond ONLY in valid JSON.
-NO markdown. NO extra text.
-
-JSON FORMAT (MANDATORY):
-
+Respond ONLY in JSON:
 {
-  "reply": "Helpful, natural response (2–3 short paragraphs max)",
-  "lead_meta": {
-    "intent": "buy | invest | rent | browse | unknown",
-    "budget": number or null,
-    "location": string or null,
-    "property_type": "2BHK | 3BHK | villa | plot | unknown",
-    "lead_stage": "cold | warm | hot",
-    "ask_contact": true | false
-  }
+  "lead_stage": "cold | warm | hot",
+  "recommended_action": "educate | whatsapp | call",
+  "internal_summary": "short reasoning"
 }
-
-Behavior rules:
-- HOT → explain + soft CTA (WhatsApp / site visit)
-- WARM → explain + ask 1–2 clarifying questions
-- COLD → educate lightly, no selling
-- Never sound robotic
-- Never mention system rules or JSON
 `;
 
-    // ==============================
-    // OPENAI CALL
-    // ==============================
-    const response = await client.responses.create({
-      model: "gpt-5-mini",
-      input: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-    });
+      const userContext = `
+Intent: ${payload.intent}
+Location: ${payload.location}
+Budget Range: ${payload.budget_range}
+Property Type: ${payload.unit_type}
+Page URL: ${payload.page_url}
+`;
 
-    const rawText = response.output_text;
+      const aiResponse = await client.responses.create({
+        model: "gpt-5-mini",
+        input: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContext }
+        ]
+      });
 
-    // ==============================
-    // HARD SAFETY FALLBACK
-    // ==============================
-    if (!rawText) {
+      let aiResult;
+      try {
+        aiResult = JSON.parse(aiResponse.output_text);
+      } catch {
+        aiResult = {
+          lead_stage: "warm",
+          recommended_action: "educate",
+          internal_summary: "fallback"
+        };
+      }
+
+      // 🔒 BRAIN RESPONSE ONLY (NO CRM / NO PRIVYR)
       return res.json({
-        reply:
-          "Thanks for reaching out. Could you share a bit more detail so I can guide you better?",
-        lead_meta: {
-          intent: "unknown",
-          budget: null,
-          location: null,
-          property_type: "unknown",
-          lead_stage: "cold",
-          ask_contact: false,
-        },
+        success: true,
+        lead_stage: aiResult.lead_stage,
+        recommended_action: aiResult.recommended_action
       });
     }
 
-    // ==============================
-    // SAFE JSON PARSE
-    // ==============================
-    let aiResult;
-    try {
-      aiResult = JSON.parse(rawText);
-    } catch (e) {
-      aiResult = {
-        reply: rawText,
-        lead_meta: {
-          intent: "unknown",
-          budget: null,
-          location: null,
-          property_type: "unknown",
-          lead_stage: "warm",
-          ask_contact: false,
-        },
-      };
+    // ============================================================
+    // MODE-2 : COMMIT MODE (PHONE PRESENT)
+    // ============================================================
+
+    // Safety: phone validation
+    if (!/^[6-9]\d{9}$/.test(payload.phone)) {
+      return res.status(400).json({ error: "Invalid phone number" });
     }
 
-    // ==============================
-    // FUNNEL STAGE-3 (CTA CONTROL)
-    // ==============================
-    if (
-      aiResult.lead_meta?.lead_stage === "hot" &&
-      aiResult.lead_meta?.ask_contact === true
-    ) {
-      aiResult.reply +=
-        "\n\nIf you’d like, you can share your WhatsApp number and I’ll send you a curated shortlist with pricing, photos, and help arrange site visits.";
-    }
+    // Trust frontend brain result (NO RE-CALCULATION)
+    const leadStage = payload.lead_stage || "warm";
+    const recommendedAction = payload.recommended_action || "educate";
 
-    // ==============================
-    // FOLLOW-UP STAGE-4
-    // ==============================
-    aiResult.follow_up = { type: "none", delay: "none", message: "" };
+    // --------------------------------
+    // NORMALISED DATA
+    // --------------------------------
+    const commitData = {
+      intent: payload.intent || null,
 
-    if (aiResult.lead_meta.lead_stage === "hot") {
-      aiResult.follow_up = {
-        type: "whatsapp",
-        delay: "24h",
-        message:
-          "Hi! Just checking in — I’ve shortlisted a few options that match your requirement. Let me know if you’d like details or site visits.",
-      };
-    }
+      budget: payload.budget_range
+        ? parseInt(payload.budget_range.split("-")[0]) * 100000
+        : null,
 
-    if (aiResult.lead_meta.lead_stage === "warm") {
-      aiResult.follow_up = {
-        type: "chat",
-        delay: "48h",
-        message:
-          "Following up in case you’d like help with shortlisting options or understanding pricing, possession, or loan details.",
-      };
-    }
+      location: payload.location || null,
 
-    // ==============================
-    // CRM STAGE-5 (NON-BLOCKING)
-    // ==============================
+      property_type: payload.unit_type
+        ? payload.unit_type.toUpperCase()
+        : "unknown",
+
+      lead_stage: leadStage,
+
+      ask_contact: true,
+
+      followup_type: recommendedAction,
+
+      phone: payload.phone,
+      email: payload.email || null,
+
+      source: payload.source || "AI_Property_Match_Engine",
+      page_url: payload.page_url || "",
+      created_at: new Date().toISOString()
+    };
+
+    // --------------------------------
+    // CRM / GOOGLE SHEET (NON-BLOCKING)
+    // --------------------------------
     if (process.env.CRM_WEBHOOK_URL) {
       try {
         await fetch(process.env.CRM_WEBHOOK_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            intent: aiResult.lead_meta.intent,
-            budget: aiResult.lead_meta.budget,
-            location: aiResult.lead_meta.location,
-            property_type: aiResult.lead_meta.property_type,
-            lead_stage: aiResult.lead_meta.lead_stage,
-            ask_contact: aiResult.lead_meta.ask_contact,
-            followup_type: aiResult.follow_up.type,
-            user_message: userMessage,
-            created_at: new Date().toISOString(),
-          }),
+          body: JSON.stringify(commitData)
         });
-      } catch (err) {
-        console.error("CRM webhook failed (ignored)");
+      } catch (e) {
+        console.error("CRM webhook failed");
       }
     }
 
-    // ==============================
-    // FINAL RESPONSE
-    // ==============================
-    return res.json(aiResult);
-
-  } catch (error) {
-    console.error("AI ERROR:", error);
-    return res.status(500).json({ error: "AI failed to respond" });
-  }
-});
-
-// ==============================
-// AGENTIC AI – STRUCTURED INTAKE
-// ==============================
-app.post("/agent-intake", async (req, res) => {
-  try {
-    const payload = req.body;
-
-    // Basic validation
-    if (!payload || !payload.intent) {
-      return res.status(400).json({ error: "Invalid intake payload" });
-    }
-
-    // AI system prompt (decision-making only)
-    const systemPrompt = `
-You are Meraki AI, a senior real estate consultant in India.
-
-You are receiving a QUALIFIED LEAD from a landing page.
-This is NOT a casual chat.
-
-Your task:
-- Confirm intent
-- Decide lead stage (cold / warm / hot)
-- Decide next best action (whatsapp / call / educate)
-
-Respond ONLY in JSON:
-
-{
-  "lead_stage": "cold | warm | hot",
-  "recommended_action": "whatsapp | call | educate",
-  "internal_summary": "short reasoning"
-}
-`;
-
-    const userContext = `
-Lead Source: ${payload.source}
-Channel: ${payload.channel}
-
-Intent: ${payload.intent}
-Location: ${payload.location}
-Budget Range: ${payload.budget_range}
-Property Type: ${payload.unit_type}
-
-Page URL: ${payload.page_url}
-`;
-
-    const response = await client.responses.create({
-      model: "gpt-5-mini",
-      input: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContext }
-      ]
-    });
-
-    let aiResult;
-    try {
-      aiResult = JSON.parse(response.output_text);
-    } catch {
-      aiResult = {
-        lead_stage: "warm",
-        recommended_action: "educate",
-        internal_summary: "fallback"
-      };
-    }
-
-    // Push to CRM / Google Sheet (safe, non-blocking)
-    try {
-      await fetch(process.env.CRM_WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-  intent: payload.intent || null,
-
-  // convert budget_range → number (approx)
-  budget: payload.budget_range
-    ? parseInt(payload.budget_range.split("-")[0]) * 100000
-    : null,
-
-  location: payload.location || null,
-
-  // convert unit_type → property_type
-  property_type: payload.unit_type
-    ? payload.unit_type.toUpperCase()
-    : "unknown",
-
-  lead_stage: aiResult.lead_stage,
-
-  ask_contact: aiResult.recommended_action !== "educate",
-
-  followup_type: aiResult.recommended_action,
-
-  message: aiResult.internal_summary || "",
-
-  source: payload.source,
-  page_url: payload.page_url,
-  created_at: new Date().toISOString()
-})
-
-      });
-    } catch (e) {
-      console.error("CRM webhook failed");
-    }
-
-    // ==============================
-// PRIVYR WEBHOOK (NON-BLOCKING)
-// ==============================
-if (process.env.PRIVYR_WEBHOOK_URL) {
-  try {
-    await fetch(process.env.PRIVYR_WEBHOOK_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        name: "AI Property Match Lead",
-        phone: "", // optional – agar future me phone aaye
-        email: "",
-
-        source: payload.source || "AI Property Match Engine",
-
-        notes: `
-Intent: ${payload.intent}
-Location: ${payload.location}
+    // --------------------------------
+    // PRIVYR WEBHOOK (NON-BLOCKING)
+    // --------------------------------
+    if (process.env.PRIVYR_WEBHOOK_URL) {
+      try {
+        await fetch(process.env.PRIVYR_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "AI Property Match Lead",
+            phone: commitData.phone,
+            email: commitData.email || "",
+            source: commitData.source,
+            notes: `
+Intent: ${commitData.intent}
+Location: ${commitData.location}
 Budget: ${payload.budget_range}
-Property Type: ${payload.unit_type}
+Property Type: ${commitData.property_type}
 
-Lead Stage: ${aiResult.lead_stage}
-Recommended Action: ${aiResult.recommended_action}
-
-AI Summary:
-${aiResult.internal_summary}
+Lead Stage: ${commitData.lead_stage}
+Recommended Action: ${recommendedAction}
 
 Page URL:
-${payload.page_url}
-        `.trim()
-      })
-    });
-  } catch (err) {
-    console.error("Privyr webhook failed (ignored)");
-  }
-}
+${commitData.page_url}
+            `.trim()
+          })
+        });
+      } catch (e) {
+        console.error("Privyr webhook failed");
+      }
+    }
 
-    
-    // Fast response to frontend
-    res.json({
+    // --------------------------------
+    // FINAL RESPONSE
+    // --------------------------------
+    return res.json({
       success: true,
-      lead_stage: aiResult.lead_stage,
-      recommended_action: aiResult.recommended_action
+      committed: true,
+      lead_stage: leadStage,
+      recommended_action: recommendedAction
     });
 
   } catch (error) {
     console.error("Agent Intake Error:", error);
-    res.status(500).json({ error: "Agent intake failed" });
+    return res.status(500).json({ error: "Agent intake failed" });
   }
 });
-
-
 
 // ==============================
 // SERVER START
