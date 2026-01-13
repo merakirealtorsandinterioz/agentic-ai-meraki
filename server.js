@@ -291,11 +291,33 @@ Page URL: ${payload.page_url}
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...payload,
-          lead_stage: aiResult.lead_stage,
-          recommended_action: aiResult.recommended_action,
-          ai_summary: aiResult.internal_summary
-        })
+  intent: payload.intent || null,
+
+  // convert budget_range → number (approx)
+  budget: payload.budget_range
+    ? parseInt(payload.budget_range.split("-")[0]) * 100000
+    : null,
+
+  location: payload.location || null,
+
+  // convert unit_type → property_type
+  property_type: payload.unit_type
+    ? payload.unit_type.toUpperCase()
+    : "unknown",
+
+  lead_stage: aiResult.lead_stage,
+
+  ask_contact: aiResult.recommended_action !== "educate",
+
+  followup_type: aiResult.recommended_action,
+
+  message: aiResult.internal_summary || "",
+
+  source: payload.source,
+  page_url: payload.page_url,
+  created_at: new Date().toISOString()
+})
+
       });
     } catch (e) {
       console.error("CRM webhook failed");
