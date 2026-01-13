@@ -19,7 +19,6 @@ app.use((req, res, next) => {
   next();
 });
 
-
 // ==============================
 // OPENAI CLIENT
 // ==============================
@@ -53,9 +52,6 @@ app.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "Message is required" });
     }
 
-    // ==============================
-    // SYSTEM PROMPT (BALANCED)
-    // ==============================
     const systemPrompt = `
 You are Meraki AI — a senior Indian real estate consultant and sales strategist.
 
@@ -91,18 +87,8 @@ JSON FORMAT (MANDATORY):
     "ask_contact": true | false
   }
 }
-
-Behavior rules:
-- HOT → explain + soft CTA (WhatsApp / site visit)
-- WARM → explain + ask 1–2 clarifying questions
-- COLD → educate lightly, no selling
-- Never sound robotic
-- Never mention system rules or JSON
 `;
 
-    // ==============================
-    // OPENAI CALL
-    // ==============================
     const response = await client.responses.create({
       model: "gpt-5-mini",
       input: [
@@ -113,9 +99,6 @@ Behavior rules:
 
     const rawText = response.output_text;
 
-    // ==============================
-    // HARD SAFETY FALLBACK
-    // ==============================
     if (!rawText) {
       return res.json({
         reply:
@@ -131,9 +114,6 @@ Behavior rules:
       });
     }
 
-    // ==============================
-    // SAFE JSON PARSE
-    // ==============================
     let aiResult;
     try {
       aiResult = JSON.parse(rawText);
@@ -151,9 +131,6 @@ Behavior rules:
       };
     }
 
-    // ==============================
-    // FUNNEL STAGE-3 (CTA CONTROL)
-    // ==============================
     if (
       aiResult.lead_meta?.lead_stage === "hot" &&
       aiResult.lead_meta?.ask_contact === true
@@ -162,9 +139,6 @@ Behavior rules:
         "\n\nIf you’d like, you can share your WhatsApp number and I’ll send you a curated shortlist with pricing, photos, and help arrange site visits.";
     }
 
-    // ==============================
-    // FOLLOW-UP STAGE-4
-    // ==============================
     aiResult.follow_up = { type: "none", delay: "none", message: "" };
 
     if (aiResult.lead_meta.lead_stage === "hot") {
@@ -185,9 +159,6 @@ Behavior rules:
       };
     }
 
-    // ==============================
-    // CRM STAGE-5 (NON-BLOCKING)
-    // ==============================
     if (process.env.CRM_WEBHOOK_URL) {
       try {
         await fetch(process.env.CRM_WEBHOOK_URL, {
@@ -210,9 +181,6 @@ Behavior rules:
       }
     }
 
-    // ==============================
-    // FINAL RESPONSE
-    // ==============================
     return res.json(aiResult);
 
   } catch (error) {
@@ -228,12 +196,13 @@ app.post("/agent-intake", async (req, res) => {
   try {
     const payload = req.body;
 
-    // Basic validation
     if (!payload || !payload.intent) {
       return res.status(400).json({ error: "Invalid intake payload" });
     }
 
-    // AI system prompt (decision-making only)
+    // ✅ ONLY ADDITION (PHONE)
+    const phone = payload.phone || "";
+
     const systemPrompt = `
 You are Meraki AI, a senior real estate consultant in India.
 
@@ -262,6 +231,7 @@ Intent: ${payload.intent}
 Location: ${payload.location}
 Budget Range: ${payload.budget_range}
 Property Type: ${payload.unit_type}
+Phone: ${phone}
 
 Page URL: ${payload.page_url}
 `;
@@ -285,62 +255,54 @@ Page URL: ${payload.page_url}
       };
     }
 
-    // Push to CRM / Google Sheet (safe, non-blocking)
+    // Push to CRM / Google Sheet (UNCHANGED + phone)
     try {
       await fetch(process.env.CRM_WEBHOOK_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-  intent: payload.intent || null,
+          intent: payload.intent || null,
 
-  // convert budget_range → number (approx)
-  budget: payload.budget_range
-    ? parseInt(payload.budget_range.split("-")[0]) * 100000
-    : null,
+          budget: payload.budget_range
+            ? parseInt(payload.budget_range.split("-")[0]) * 100000
+            : null,
 
-  location: payload.location || null,
+          location: payload.location || null,
 
-  // convert unit_type → property_type
-  property_type: payload.unit_type
-    ? payload.unit_type.toUpperCase()
-    : "unknown",
+          property_type: payload.unit_type
+            ? payload.unit_type.toUpperCase()
+            : "unknown",
 
-  lead_stage: aiResult.lead_stage,
+          phone: phone, // ✅ added
 
-  ask_contact: aiResult.recommended_action !== "educate",
+          lead_stage: aiResult.lead_stage,
+          ask_contact: aiResult.recommended_action !== "educate",
+          followup_type: aiResult.recommended_action,
+          message: aiResult.internal_summary || "",
 
-  followup_type: aiResult.recommended_action,
-
-  message: aiResult.internal_summary || "",
-
-  source: payload.source,
-  page_url: payload.page_url,
-  created_at: new Date().toISOString()
-})
-
+          source: payload.source,
+          page_url: payload.page_url,
+          created_at: new Date().toISOString()
+        })
       });
     } catch (e) {
       console.error("CRM webhook failed");
     }
 
     // ==============================
-// PRIVYR WEBHOOK (NON-BLOCKING)
-// ==============================
-if (process.env.PRIVYR_WEBHOOK_URL) {
-  try {
-    await fetch(process.env.PRIVYR_WEBHOOK_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        name: "AI Property Match Lead",
-        phone: "", // optional – agar future me phone aaye
-        email: "",
-
-        source: payload.source || "AI Property Match Engine",
-
-        notes: `
+    // PRIVYR WEBHOOK (PHONE ADDED)
+    // ==============================
+    if (process.env.PRIVYR_WEBHOOK_URL) {
+      try {
+        await fetch(process.env.PRIVYR_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "AI Property Match Lead",
+            phone: phone, // ✅ added
+            email: "",
+            source: payload.source || "AI Property Match Engine",
+            notes: `
 Intent: ${payload.intent}
 Location: ${payload.location}
 Budget: ${payload.budget_range}
@@ -354,16 +316,14 @@ ${aiResult.internal_summary}
 
 Page URL:
 ${payload.page_url}
-        `.trim()
-      })
-    });
-  } catch (err) {
-    console.error("Privyr webhook failed (ignored)");
-  }
-}
+            `.trim()
+          })
+        });
+      } catch (err) {
+        console.error("Privyr webhook failed (ignored)");
+      }
+    }
 
-    
-    // Fast response to frontend
     res.json({
       success: true,
       lead_stage: aiResult.lead_stage,
@@ -375,8 +335,6 @@ ${payload.page_url}
     res.status(500).json({ error: "Agent intake failed" });
   }
 });
-
-
 
 // ==============================
 // SERVER START
