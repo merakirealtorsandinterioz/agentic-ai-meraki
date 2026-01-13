@@ -19,7 +19,6 @@ app.use((req, res, next) => {
   next();
 });
 
-
 // ==============================
 // OPENAI CLIENT
 // ==============================
@@ -61,19 +60,8 @@ Your tone:
 - Slightly descriptive but never long-winded
 - Practical, market-aware, trustworthy
 
-Your funnel logic:
-1) First explain briefly (market clarity / reassurance)
-2) Then guide to next logical step
-3) Ask for WhatsApp/contact ONLY if intent is strong (hot lead)
-
-Lead understanding:
-- Identify intent: buy | invest | rent | browse | unknown
-- Extract budget, location, property type if mentioned
-- Decide lead_stage: cold | warm | hot
-
-IMPORTANT OUTPUT RULE (STRICT):
-You MUST respond ONLY in valid JSON.
-NO markdown. NO extra text.
+IMPORTANT OUTPUT RULE:
+Respond ONLY in valid JSON.
 `;
 
     const response = await client.responses.create({
@@ -84,14 +72,12 @@ NO markdown. NO extra text.
       ],
     });
 
-    const rawText = response.output_text;
-
     let aiResult;
     try {
-      aiResult = JSON.parse(rawText);
+      aiResult = JSON.parse(response.output_text);
     } catch {
       aiResult = {
-        reply: rawText,
+        reply: "Thanks for reaching out. We’ll guide you shortly.",
         lead_meta: {
           intent: "unknown",
           budget: null,
@@ -103,27 +89,10 @@ NO markdown. NO extra text.
       };
     }
 
-    if (process.env.CRM_WEBHOOK_URL) {
-      try {
-        await fetch(process.env.CRM_WEBHOOK_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            intent: aiResult.lead_meta.intent,
-            budget: aiResult.lead_meta.budget,
-            location: aiResult.lead_meta.location,
-            property_type: aiResult.lead_meta.property_type,
-            lead_stage: aiResult.lead_meta.lead_stage,
-            ask_contact: aiResult.lead_meta.ask_contact,
-            user_message: userMessage,
-            created_at: new Date().toISOString(),
-          }),
-        });
-      } catch {}
-    }
-
     return res.json(aiResult);
-  } catch {
+
+  } catch (error) {
+    console.error("AI ERROR:", error);
     return res.status(500).json({ error: "AI failed to respond" });
   }
 });
@@ -139,10 +108,6 @@ app.post("/agent-intake", async (req, res) => {
       return res.status(400).json({ error: "Invalid intake payload" });
     }
 
-    // ✅ ONLY ADDITIONS
-    const phone = payload.phone || "";
-    const email = payload.email || "";
-
     const systemPrompt = `
 You are Meraki AI, a senior real estate consultant in India.
 
@@ -152,47 +117,41 @@ Decide:
 - lead stage (cold / warm / hot)
 - next best action (whatsapp / call / educate)
 
-Respond ONLY in JSON:
-{
-  "lead_stage": "cold | warm | hot",
-  "recommended_action": "whatsapp | call | educate",
-  "internal_summary": "short reasoning"
-}
+Respond ONLY in JSON.
 `;
 
     const userContext = `
 Intent: ${payload.intent}
 Location: ${payload.location}
-Budget Range: ${payload.budget_range}
+Budget: ${payload.budget_range}
 Property Type: ${payload.unit_type}
-Phone: ${phone}
-Email: ${email}
-
 Page URL: ${payload.page_url}
 `;
 
-    const response = await client.responses.create({
-      model: "gpt-5-mini",
-      input: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContext },
-      ],
-    });
-
     let aiResult;
+
+    // ===== FIX: SAFE AI CALL WITH FALLBACK =====
     try {
+      const response = await client.responses.create({
+        model: "gpt-5-mini",
+        input: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContext },
+        ],
+      });
+
       aiResult = JSON.parse(response.output_text);
-    } catch {
+
+    } catch (err) {
+      console.error("OpenAI failed, using fallback");
       aiResult = {
         lead_stage: "warm",
-        recommended_action: "educate",
-        internal_summary: "fallback",
+        recommended_action: "whatsapp",
+        internal_summary: "AI fallback used",
       };
     }
 
-    // ==============================
-    // GOOGLE SHEET (UNCHANGED + phone + email)
-    // ==============================
+    // Push to Google Sheet / CRM
     if (process.env.CRM_WEBHOOK_URL) {
       try {
         await fetch(process.env.CRM_WEBHOOK_URL, {
@@ -203,10 +162,6 @@ Page URL: ${payload.page_url}
             budget: payload.budget_range || null,
             location: payload.location || null,
             property_type: payload.unit_type || null,
-
-            phone: phone,   // ✅ added
-            email: email,   // ✅ added (optional)
-
             lead_stage: aiResult.lead_stage,
             ask_contact: aiResult.recommended_action !== "educate",
             followup_type: aiResult.recommended_action,
@@ -216,12 +171,12 @@ Page URL: ${payload.page_url}
             created_at: new Date().toISOString(),
           }),
         });
-      } catch {}
+      } catch (e) {
+        console.error("CRM webhook failed");
+      }
     }
 
-    // ==============================
-    // PRIVYR (UNCHANGED + phone + email)
-    // ==============================
+    // Privyr
     if (process.env.PRIVYR_WEBHOOK_URL) {
       try {
         await fetch(process.env.PRIVYR_WEBHOOK_URL, {
@@ -229,32 +184,33 @@ Page URL: ${payload.page_url}
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name: "AI Property Match Lead",
-            phone: phone,
-            email: email, // ✅ optional
-
+            phone: payload.phone || "",
+            email: payload.email || "",
             source: payload.source || "AI Property Match Engine",
             notes: `
 Intent: ${payload.intent}
 Location: ${payload.location}
 Budget: ${payload.budget_range}
 Property Type: ${payload.unit_type}
-
 Lead Stage: ${aiResult.lead_stage}
 Recommended Action: ${aiResult.recommended_action}
-
-${aiResult.internal_summary}
             `.trim(),
           }),
         });
-      } catch {}
+      } catch (err) {
+        console.error("Privyr webhook failed");
+      }
     }
 
+    // FINAL RESPONSE (THIS MAKES POPUP WORK)
     res.json({
       success: true,
       lead_stage: aiResult.lead_stage,
       recommended_action: aiResult.recommended_action,
     });
-  } catch {
+
+  } catch (error) {
+    console.error("Agent Intake Error:", error);
     res.status(500).json({ error: "Agent intake failed" });
   }
 });
