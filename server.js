@@ -323,6 +323,46 @@ Page URL: ${payload.page_url}
       console.error("CRM webhook failed");
     }
 
+    // ==============================
+// PRIVYR WEBHOOK (NON-BLOCKING)
+// ==============================
+if (process.env.PRIVYR_WEBHOOK_URL) {
+  try {
+    await fetch(process.env.PRIVYR_WEBHOOK_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        name: "AI Property Match Lead",
+        phone: "", // optional – agar future me phone aaye
+        email: "",
+
+        source: payload.source || "AI Property Match Engine",
+
+        notes: `
+Intent: ${payload.intent}
+Location: ${payload.location}
+Budget: ${payload.budget_range}
+Property Type: ${payload.unit_type}
+
+Lead Stage: ${aiResult.lead_stage}
+Recommended Action: ${aiResult.recommended_action}
+
+AI Summary:
+${aiResult.internal_summary}
+
+Page URL:
+${payload.page_url}
+        `.trim()
+      })
+    });
+  } catch (err) {
+    console.error("Privyr webhook failed (ignored)");
+  }
+}
+
+    
     // Fast response to frontend
     res.json({
       success: true,
