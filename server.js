@@ -52,7 +52,6 @@ app.get("/health", (req, res) => {
 app.post("/agent-brain", async (req, res) => {
   try {
     const payload = req.body;
-
     if (!payload || !payload.intent) {
       return res.status(400).json({ error: "Invalid payload" });
     }
@@ -81,13 +80,11 @@ Respond ONLY in JSON:
 }
 `;
 
-    // ✅ UPGRADED CONTEXT (timeline added)
     const userContext = `
 Intent: ${payload.intent}
 Location: ${payload.location}
 Budget: ${payload.budget_range}
 Property Type: ${payload.unit_type}
-Purchase Timeline: ${payload.purchase_timeline || "Not specified"}
 `;
 
     const response = await client.responses.create({
@@ -105,8 +102,7 @@ Purchase Timeline: ${payload.purchase_timeline || "Not specified"}
       aiResult = {
         lead_stage: "warm",
         recommended_action: "educate",
-        message:
-          "User interest noted but urgency is moderate. Recommend light WhatsApp follow-up."
+        message: "User interest noted but intent clarity is moderate. Recommend light WhatsApp follow-up."
       };
     }
 
@@ -139,18 +135,17 @@ app.post("/agent-commit", async (req, res) => {
     }
 
     // ==============================
-    // NORMALISE DATA (UPGRADED)
+    // NORMALISE DATA
     // ==============================
     const leadData = {
       intent: payload.intent || null,
       budget: payload.budget_range
-        ? parseInt(payload.budget_range.split("–")[0]) * 100000
+        ? parseInt(payload.budget_range.split("-")[0]) * 100000
         : null,
       location: payload.location || null,
       property_type: payload.unit_type
         ? payload.unit_type.toUpperCase()
         : "unknown",
-      purchase_timeline: payload.purchase_timeline || "unknown",
       lead_stage: payload.lead_stage || "warm",
       ask_contact: true,
       followup_type: payload.recommended_action || "educate",
@@ -195,7 +190,6 @@ Intent: ${leadData.intent}
 Location: ${leadData.location}
 Budget: ${payload.budget_range}
 Property Type: ${payload.unit_type}
-Purchase Timeline: ${leadData.purchase_timeline}
 
 Lead Stage: ${leadData.lead_stage}
 Action: ${leadData.followup_type}
